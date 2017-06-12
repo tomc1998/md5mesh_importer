@@ -1,10 +1,13 @@
+#[macro_use]
+extern crate nom;
+
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-      use load_mesh;
-      load_mesh("test.md5mesh");
-    }
+  #[test]
+  fn it_works() {
+    use load_mesh;
+    load_mesh("test.md5mesh");
+  }
 }
 
 use std::path::Path;
@@ -31,12 +34,25 @@ impl Joint {
   }
 }
 
+/// A vertex in the MD5 file.
+pub struct Vert {
+}
+
+pub struct MD5Mesh {
+}
+
 pub struct MD5Scene {
   pub joint_list: Vec<Joint>,
+  pub shader_name: String,
+  pub verts: Vec<Vert>
 }
 impl MD5Scene {
   pub fn new() -> MD5Scene {
-    MD5Scene { joint_list: Vec::new() }
+    MD5Scene { 
+      joint_list: Vec::new(),
+      shader_name: "".to_owned(),
+      verts: Vec::new(),
+    }
   }
 }
 
@@ -53,54 +69,65 @@ pub struct MD5MeshHeader {
   num_meshes: u32,
 }
 
+use nom::{digit, space};
+use std::str::FromStr;
+
+/// Parse a number to a u32. Integer overflows will result in an error.
+named!( parse_u32<&str, u32>, map_res!( digit, u32::from_str));
+/// Parse a number to a i32. Integer overflows will result in an error.
+named!( parse_i32<&str, u32>, map_res!( digit, u32::from_str));
+
+/// Parser for the md5mesh header
+named!(
+  parse_md5mesh_header<&str, MD5MeshHeader>, 
+  do_parse!(
+
+    // Version
+    tag!("MD5Version") >>
+    many0!(space) >>
+    md5_version: parse_u32 >>
+    take_until_and_consume_s!("\n") >>
+
+    // Command line 
+    tag!("commandline") >>
+    many0!(space) >>
+    command_line: delimited!(tag!("\""), take_until!("\""), tag!("\"")) >>
+    take!(1) >>
+
+    // Optional empty line in header (not sure if essential to spec)
+    opt!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+
+    // Num Joints
+    tag!("numJoints") >>
+    many0!(space) >>
+    num_joints: parse_u32 >>
+    take_until_and_consume_s!("\n") >>
+
+    // Num Meshes
+    tag!("numMeshes") >>
+    many0!(space) >>
+    num_meshes: parse_u32 >>
+    take_until_and_consume_s!("\n") >>
+
+  (MD5MeshHeader {
+    md5_version: md5_version,
+    command_line: command_line.to_owned(),
+    num_joints: num_joints,
+    num_meshes: num_meshes,
+  })
+)
+);
+
 pub fn load_mesh<P: AsRef<Path>>(path: P) -> MD5Scene {
   use std::io::prelude::*;
-  use std::io::BufReader;
   use std::fs::File;
 
-  let f = File::open(path).unwrap();
-  let reader = BufReader::new(f);
-  let lines : Vec<String> = reader.lines().map(|i| i.unwrap()).collect();
+  let mut f = File::open(path).unwrap();
+  let mut data = String::new();
+  f.read_to_string(&mut data).unwrap();
 
-  let header = MD5MeshHeader {
-    md5_version : lines[0].split_whitespace().skip(1).next().unwrap().parse().unwrap(),
-    command_line : lines[1].split_whitespace().skip(1).next().unwrap().trim_matches('"').to_string(),
-    num_joints : lines[3].split_whitespace().skip(1).next().unwrap().parse().unwrap(),
-    num_meshes : lines[4].split_whitespace().skip(1).next().unwrap().parse().unwrap(),
-  };
-
-  // Parse out the joints and mesh blocks in the file
-  let blocks : Vec<String> = lines[5..].join("\n").split("\n\n").map(|i| i.to_string()).collect();
-
-  // Parse joints
-  let mut joints_data : Vec<String> = blocks[0].trim().split("\n").map(|i| i.to_string()).collect();
-  // Strip first and last item
-  {
-    let len = joints_data.len();
-    joints_data.remove(len-1);
-    joints_data.remove(0);
-  }
-  let mut joint_list : Vec<Joint> = Vec::with_capacity(header.num_joints as usize);
-  for j in joints_data {
-    let parts : Vec<String> = j.split_whitespace().map(|i| i.to_string()).collect();
-    let mut joint = Joint {
-      name: parts[0].trim_matches('"').to_string(),
-      parent_ix: parts[1].parse().unwrap(),
-      position: [ parts[3].parse().unwrap(), 
-        parts[4].parse().unwrap(), 
-        parts[5].parse().unwrap()
-      ],
-      orientation: [ parts[8].parse().unwrap(), 
-        parts[9].parse().unwrap(), 
-        parts[10].parse().unwrap(),
-        0.0f32,
-      ],
-    };
-    joint.calc_ori_w();
-    joint_list.push(joint);
-  }
-
-  // Parse mesh
+  let header = parse_md5mesh_header(&data);
+  println!("{:?}", header);
 
   return MD5Scene::new();
 }
