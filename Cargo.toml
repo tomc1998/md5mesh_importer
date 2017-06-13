@@ -3,12 +3,7 @@ name = "md5mesh_importer"
 version = "0.1.0"
 authors = ["Thomas Cheng <thomascheng1998@googlemail.com>"]
 
-[dependencies]
-nom = "*"
-
-[features]
-default = []
-
-[profile.test]
-default = ["verbose-errors"]
+[dependencies.nom]
+version = "*"
+features = ["verbose-errors"]
 

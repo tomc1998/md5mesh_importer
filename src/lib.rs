@@ -6,7 +6,7 @@ mod tests {
   #[test]
   fn it_works() {
     use load_mesh;
-    load_mesh("test.md5mesh");
+    load_mesh("boblampclean.md5mesh");
   }
 }
 
@@ -133,6 +133,18 @@ pub struct MD5MeshHeader {
 use nom::{float_s, digit, space};
 use std::str::FromStr;
 
+/// Parser to consume to the end of a line if all that is contained is a comment
+named!(consume_rest_of_line_if_comment<&str, &str>,
+  do_parse!(
+    opt!(space) >>
+    alt!(
+      tag!("\n") |
+      tag!("\r\n") |
+      do_parse!( tag!("//") >> take_until_and_consume_s!("\n") >> ("") )) >>
+    ("")
+  )
+);
+
 /// Parse a number to a u32. Integer overflows will result in an error.
 named!(parse_u32<&str, u32>, map_res!( digit, u32::from_str));
 /// Parse a number to a i32. Integer overflows will result in an error.
@@ -160,35 +172,35 @@ named!(
     tag!("MD5Version") >>
     space >>
     md5_version: parse_u32 >>
-    take_until_and_consume_s!("\n") >>
+    consume_rest_of_line_if_comment >>
 
     // Command line 
     tag!("commandline") >>
     space >>
     command_line: delimited!(tag!("\""), take_until!("\""), tag!("\"")) >>
-    take!(1) >>
+    consume_rest_of_line_if_comment >>
 
     // Optional empty line in header (not sure if essential to spec)
-    opt!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    opt!(consume_rest_of_line_if_comment) >>
 
     // Num Joints
     tag!("numJoints") >>
     space >>
     num_joints: parse_u32 >>
-  take_until_and_consume_s!("\n") >>
+    consume_rest_of_line_if_comment >>
 
-  // Num Meshes
-  tag!("numMeshes") >>
-  space >>
-  num_meshes: parse_u32 >>
-  take_until_and_consume_s!("\n") >>
+    // Num Meshes
+    tag!("numMeshes") >>
+    space >>
+    num_meshes: parse_u32 >>
+    consume_rest_of_line_if_comment >>
 
-  (MD5MeshHeader {
-    md5_version: md5_version,
-    command_line: command_line.to_owned(),
-    num_joints: num_joints,
-    num_meshes: num_meshes,
-  })
+    (MD5MeshHeader {
+      md5_version: md5_version,
+      command_line: command_line.to_owned(),
+      num_joints: num_joints,
+      num_meshes: num_meshes,
+    })
 ));
 
 /// Parser for a 3 dimension vector of f32s (Position and orientation of joint).
@@ -223,7 +235,7 @@ named!(
   do_parse!(
     // Parse the start of the block
     tag!("joints {") >>
-    alt!(tag!("\n") | tag!("\r\n") | tag!("\r")) >>
+    consume_rest_of_line_if_comment >>
     // Parse actual joints
     joint_vec: many0!(
       do_parse!(
@@ -235,14 +247,15 @@ named!(
         joint_pos: delimited!(tag!("("), parse_vec3f, tag!(")")) >>
         space >>
         joint_ori: delimited!(tag!("("), parse_vec3f, tag!(")")) >>
-        opt!(space) >>
-        many1!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+        consume_rest_of_line_if_comment >>
+        many0!(consume_rest_of_line_if_comment) >>
         (Joint::new_and_calc_ori_w( joint_name, parent_ix as isize, &joint_pos, &joint_ori ))
       )
     ) >>
     // Parse closing }
     tag!("}") >>
-    opt!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    consume_rest_of_line_if_comment >>
+    many0!(consume_rest_of_line_if_comment) >>
     (joint_vec)
   )
 );
@@ -260,7 +273,8 @@ named!(parse_md5mesh_mesh_vert<&str, Vert>,
     start_weight: parse_u32 >> 
     space >>
     weight_count: parse_u32 >> 
-    opt!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    consume_rest_of_line_if_comment >>
+    many0!(consume_rest_of_line_if_comment) >>
     (Vert{
       index: vert_index as usize,
       uv: uv,
@@ -274,11 +288,12 @@ named!(parse_md5mesh_mesh_vert<&str, Vert>,
 named!(parse_md5mesh_mesh_verts<&str, Vec<Vert>>,
   do_parse!(
     // Get num verts
-    space >>
+    opt!(space) >>
     tag!("numverts") >>
     space >>
     num_verts: parse_u32 >>
-    alt!(tag!("\n") | tag!("\r\n") | tag!("\r")) >>
+    consume_rest_of_line_if_comment >>
+    many0!(consume_rest_of_line_if_comment) >>
 
     // Parse all verts
     verts: count!( parse_md5mesh_mesh_vert, num_verts as usize ) >>
@@ -300,8 +315,8 @@ named!(parse_md5mesh_mesh_tri<&str, Tri>,
     v2: parse_u32 >>
     space >>
     v3: parse_u32 >>
-    opt!(space) >>
-    opt!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    consume_rest_of_line_if_comment >>
+    many0!(consume_rest_of_line_if_comment) >>
     (Tri{
       index: tri_index as usize,
       vert_index_1: v1 as usize,
@@ -319,7 +334,8 @@ named!(parse_md5mesh_mesh_tris<&str, Vec<Tri>>,
     tag!("numtris") >>
     space >>
     num_tris: parse_u32 >>
-    alt!(tag!("\n") | tag!("\r\n") | tag!("\r")) >>
+    consume_rest_of_line_if_comment >>
+    many0!(consume_rest_of_line_if_comment) >>
 
     // Parse all tris
     tris: count!( parse_md5mesh_mesh_tri, num_tris as usize ) >>
@@ -341,8 +357,8 @@ named!(parse_md5mesh_mesh_weight<&str, Weight>,
     bias: parse_f32 >>
     space >>
     pos: delimited!(tag!("("), parse_vec3f, tag!(")")) >>
-    opt!(space) >>
-    opt!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    consume_rest_of_line_if_comment >>
+    many0!(consume_rest_of_line_if_comment) >>
     (Weight{
       index: weight_index as usize,
       joint: joint as usize,
@@ -360,7 +376,8 @@ named!(parse_md5mesh_mesh_weights<&str, Vec<Weight>>,
     tag!("numweights") >>
     space >>
     num_weights: parse_u32 >>
-    alt!(tag!("\n") | tag!("\r\n") | tag!("\r")) >>
+    consume_rest_of_line_if_comment >>
+    many0!(consume_rest_of_line_if_comment) >>
 
     // Parse all weights
     weights: count!( parse_md5mesh_mesh_weight, num_weights as usize ) >>
@@ -376,7 +393,8 @@ named!(parse_md5mesh_mesh_shader<&str, &str>,
     tag!("shader") >>
     space >>
     shader_name: delimited!(tag!("\""), take_until!("\""), tag!("\"")) >>
-    alt!(tag!("\n") | tag!("\r\n") | tag!("\r")) >>
+    consume_rest_of_line_if_comment >>
+    many0!(consume_rest_of_line_if_comment) >>
     (shader_name)
   )
 );
@@ -386,15 +404,16 @@ named!(parse_md5mesh_mesh<&str, MD5Mesh>,
   do_parse!(
     // Parse the start of the block
     tag!("mesh {") >>
-    alt!(tag!("\n") | tag!("\r\n") | tag!("\r")) >>
+    consume_rest_of_line_if_comment >>
+    many0!(consume_rest_of_line_if_comment) >>
     shader: parse_md5mesh_mesh_shader >>
-    many0!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    many0!(consume_rest_of_line_if_comment) >>
     verts: parse_md5mesh_mesh_verts >>
-    many0!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    many0!(consume_rest_of_line_if_comment) >>
     tris: parse_md5mesh_mesh_tris >>
-    many0!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    many0!(consume_rest_of_line_if_comment) >>
     weights: parse_md5mesh_mesh_weights >>
-    many0!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    many0!(consume_rest_of_line_if_comment) >>
     // Parse end of black
     tag!("}") >>
     (MD5Mesh{ verts: verts, tris: tris, weights: weights, shader: shader.to_owned() })
@@ -405,13 +424,13 @@ named!(parse_md5mesh_mesh<&str, MD5Mesh>,
 named!(parse_md5mesh<&str, MD5Scene>,
   do_parse!(
     header: parse_md5mesh_header >>
-    opt!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    many0!(consume_rest_of_line_if_comment) >>
     joints: parse_md5mesh_joints >> 
-    opt!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+    many0!(consume_rest_of_line_if_comment) >>
     meshes: many0!(
       do_parse!(
         mesh: parse_md5mesh_mesh >>
-        many0!(alt!(tag!("\n") | tag!("\r\n") | tag!("\r"))) >>
+        many0!(consume_rest_of_line_if_comment) >>
         (mesh)
       )
     ) >>
